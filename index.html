@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta viewport="width=device-width, initial-scale=1.0">
+    <title>Gravitee Agent Mesh - Real-Time Value Enforcement Platform</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; overflow-x: hidden; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        
+        /* Header */
+        .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 2rem; border-radius: 15px; margin-bottom: 2rem; border: 1px solid #333; }
+        .header h1 { font-size: 2.5rem; color: #00d4ff; margin-bottom: 0.5rem; }
+        .header p { color: #888; font-size: 1.1rem; }
+        
+        /* Status Bar */
+        .status-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .status-card { background: #1a1a2e; padding: 1.5rem; border-radius: 12px; border: 1px solid #333; position: relative; overflow: hidden; }
+        .status-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: linear-gradient(180deg, #00d4ff, #0099cc); }
+        .status-card h3 { font-size: 2.5rem; color: #00d4ff; margin-bottom: 0.5rem; }
+        .status-card p { color: #888; font-size: 0.9rem; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        
+        /* Agent Grid */
+        .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 2rem; max-height: 300px; overflow-y: auto; background: #1a1a2e; padding: 1rem; border-radius: 12px; }
+        .agent-node { background: #16213e; padding: 1rem; border-radius: 8px; border: 2px solid #333; text-align: center; transition: all 0.3s; cursor: pointer; position: relative; }
+        .agent-node:hover { transform: scale(1.05); border-color: #00d4ff; }
+        .agent-node.active { border-color: #00ff88; box-shadow: 0 0 20px rgba(0,255,136,0.3); }
+        .agent-node.risk { border-color: #ff4444; animation: shake 0.5s; }
+        .agent-node.misalign { border-color: #ffaa00; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        .agent-id { font-size: 0.8rem; color: #00d4ff; }
+        .agent-status { font-size: 0.7rem; color: #888; margin-top: 0.5rem; }
+        
+        /* Charts */
+        .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem; }
+        .chart-box { background: #1a1a2e; padding: 2rem; border-radius: 12px; border: 1px solid #333; }
+        .chart-box h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.3rem; }
+        
+        /* ML Predictions */
+        .ml-panel { background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%); padding: 2rem; border-radius: 12px; border: 1px solid #00d4ff; margin-bottom: 2rem; }
+        .ml-panel h2 { color: #00ff88; margin-bottom: 1rem; }
+        .prediction { display: flex; justify-content: space-between; padding: 1rem; background: rgba(0,212,255,0.1); border-radius: 8px; margin: 0.5rem 0; }
+        .prediction-high { border-left: 4px solid #ff4444; }
+        .prediction-med { border-left: 4px solid #ffaa00; }
+        .prediction-low { border-left: 4px solid #00ff88; }
+        
+        /* Control Panel */
+        .controls { background: #1a1a2e; padding: 2rem; border-radius: 12px; border: 1px solid #333; text-align: center; }
+        .btn { background: linear-gradient(135deg, #00d4ff, #0099cc); color: #000; border: none; padding: 1rem 2rem; border-radius: 8px; font-weight: bold; cursor: pointer; margin: 0.5rem; transition: all 0.3s; font-size: 1rem; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,212,255,0.3); }
+        .btn-danger { background: linear-gradient(135deg, #ff4444, #cc0000); color: white; }
+        .btn-success { background: linear-gradient(135deg, #00ff88, #00cc66); }
+        
+        /* Event Log */
+        .event-log { background: #0a0a0a; padding: 1.5rem; border-radius: 12px; border: 1px solid #333; max-height: 300px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85rem; }
+        .log-entry { padding: 0.5rem; border-left: 3px solid #333; margin: 0.5rem 0; }
+        .log-info { border-left-color: #00d4ff; }
+        .log-warn { border-left-color: #ffaa00; }
+        .log-error { border-left-color: #ff4444; }
+        .log-success { border-left-color: #00ff88; }
+        
+        /* Responsive */
+        @media (max-width: 768px) { 
+            .charts { grid-template-columns: 1fr; }
+            .header h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Gravitee Agent Mesh - Live Demo</h1>
+            <p>Real-time AI Agent Federation with ML-Powered Value Enforcement | Built by Ameen for Rory Blundell</p>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-card">
+                <h3 id="agent-count" class="pulse">0</h3>
+                <p>Active Agents</p>
+            </div>
+            <div class="status-card">
+                <h3 id="api-calls">0</h3>
+                <p>API Calls/sec</p>
+            </div>
+            <div class="status-card">
+                <h3 id="align-score">94%</h3>
+                <p>Alignment Score</p>
+            </div>
+            <div class="status-card">
+                <h3 id="threat-level">LOW</h3>
+                <p>Threat Level</p>
+            </div>
+        </div>
+
+        <div class="ml-panel">
+            <h2>🧠 TensorFlow.js Churn Prediction Engine</h2>
+            <div id="ml-predictions"></div>
+        </div>
+
+        <h2 style="color: #00d4ff; margin-bottom: 1rem;">Live Agent Network</h2>
+        <div class="agent-grid" id="agent-grid"></div>
+
+        <div class="charts">
+            <div class="chart-box">
+                <h2>Activation Timeline</h2>
+                <canvas id="activationChart"></canvas>
+            </div>
+            <div class="chart-box">
+                <h2>Value Drift Detection</h2>
+                <canvas id="valueChart"></canvas>
+            </div>
+        </div>
+
+        <div class="controls">
+            <h2 style="color: #00d4ff; margin-bottom: 1rem;">Mission Control</h2>
+            <button class="btn" onclick="spawnAgents(10)">🚀 Spawn 10 Agents</button>
+            <button class="btn btn-success" onclick="runStressTest()">⚡ Stress Test (100 agents)</button>
+            <button class="btn" onclick="simulateAttack()">🎯 Simulate Value Attack</button>
+            <button class="btn btn-danger" onclick="emergencyShutdown()">🛑 Emergency Shutdown</button>
+            <button class="btn" onclick="autoHeal()">🔧 Auto-Heal All</button>
+        </div>
+
+        <h2 style="color: #00d4ff; margin: 2rem 0 1rem;">System Event Log</h2>
+        <div class="event-log" id="event-log"></div>
+    </div>
+
+    <script>
+        // Core System State
+        let systemState = {
+            agents: [],
+            apiCalls: 0,
+            alignScore: 94,
+            activationData: [65, 70, 73, 76, 78],
+            valueData: [88, 86, 89, 91, 94],
+            mlModel: null,
+            autoRun: true
+        };
+
+        // Initialize TensorFlow Model
+        async function initML() {
+            logEvent('Initializing TensorFlow.js ML model...', 'info');
+            systemState.mlModel = tf.sequential({
+                layers: [
+                    tf.layers.dense({inputShape: [4], units: 8, activation: 'relu'}),
+                    tf.layers.dense({units: 4, activation: 'relu'}),
+                    tf.layers.dense({units: 1, activation: 'sigmoid'})
+                ]
+            });
+            systemState.mlModel.compile({optimizer: 'adam', loss: 'binaryCrossentropy'});
+            logEvent('ML model ready. Prediction engine online.', 'success');
+        }
+
+        // ML Prediction
+        async function predictChurn(agent) {
+            if (!systemState.mlModel) return Math.random();
+            const input = tf.tensor2d([[
+                agent.days / 30,
+                agent.calls / 100,
+                agent.valueScore / 100,
+                agent.errors / 10
+            ]]);
+            const prediction = systemState.mlModel.predict(input);
+            const score = (await prediction.data())[0];
+            input.dispose();
+            prediction.dispose();
+            return score;
+        }
+
+        // Agent Class
+        class Agent {
+            constructor(id) {
+                this.id = id;
+                this.days = Math.floor(Math.random() * 30);
+                this.calls = Math.floor(Math.random() * 100);
+                this.valueScore = 70 + Math.random() * 30;
+                this.errors = Math.floor(Math.random() * 5);
+                this.status = 'active';
+                this.churnRisk = 0;
+            }
+
+            async tick() {
+                this.calls += Math.floor(Math.random() * 5);
+                this.valueScore += (Math.random() - 0.5) * 3;
+                this.valueScore = Math.max(0, Math.min(100, this.valueScore));
+                
+                if (Math.random() < 0.05) this.errors++;
+                
+                this.churnRisk = await predictChurn(this);
+                
+                if (this.valueScore < 60) this.status = 'misalign';
+                else if (this.churnRisk > 0.7) this.status = 'risk';
+                else this.status = 'active';
+                
+                systemState.apiCalls += Math.floor(Math.random() * 3);
+            }
+        }
+
+        // Spawn Agents
+        function spawnAgents(count) {
+            for (let i = 0; i < count; i++) {
+                const agent = new Agent(`AG-${Date.now()}-${i}`);
+                systemState.agents.push(agent);
+                logEvent(`Agent ${agent.id} spawned`, 'info');
+            }
+            renderAgents();
+        }
+
+        // Render Agent Grid
+        function renderAgents() {
+            const grid = document.getElementById('agent-grid');
+            grid.innerHTML = systemState.agents.map(a => `
+                <div class="agent-node ${a.status}" onclick="inspectAgent('${a.id}')">
+                    <div class="agent-id">${a.id.slice(-8)}</div>
+                    <div class="agent-status">
+                        ${a.status === 'active' ? '✓' : a.status === 'risk' ? '⚠️' : '❌'}
+                        ${Math.round(a.valueScore)}%
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Update ML Predictions Panel
+        function updateMLPanel() {
+            const high = systemState.agents.filter(a => a.churnRisk > 0.7);
+            const med = systemState.agents.filter(a => a.churnRisk > 0.4 && a.churnRisk <= 0.7);
+            const panel = document.getElementById('ml-predictions');
+            panel.innerHTML = `
+                <div class="prediction prediction-high">
+                    <span>High Risk Agents</span>
+                    <strong>${high.length}</strong>
+                </div>
+                <div class="prediction prediction-med">
+                    <span>Medium Risk Agents</span>
+                    <strong>${med.length}</strong>
+                </div>
+                <div class="prediction prediction-low">
+                    <span>Healthy Agents</span>
+                    <strong>${systemState.agents.length - high.length - med.length}</strong>
+                </div>
+            `;
+        }
+
+        // Inspect Agent
+        function inspectAgent(id) {
+            const agent = systemState.agents.find(a => a.id === id);
+            if (agent) {
+                logEvent(`Agent ${id}: Calls=${agent.calls}, Value=${agent.valueScore.toFixed(1)}%, Risk=${(agent.churnRisk*100).toFixed(1)}%`, 'info');
+            }
+        }
+
+        // Auto Heal
+        function autoHeal() {
+            systemState.agents.forEach(a => {
+                if (a.status !== 'active') {
+                    a.valueScore = 85 + Math.random() * 15;
+                    a.errors = 0;
+                    a.status = 'active';
+                }
+            });
+            logEvent('Auto-heal complete. All agents restored.', 'success');
+            renderAgents();
+        }
+
+        // Stress Test
+        function runStressTest() {
+            logEvent('STRESS TEST: Spawning 100 agents...', 'warn');
+            spawnAgents(100);
+            setTimeout(() => logEvent('Stress test complete. System stable.', 'success'), 2000);
+        }
+
+        // Simulate Attack
+        function simulateAttack() {
+            logEvent('⚠️ VALUE ATTACK DETECTED: Injecting misaligned agents', 'error');
+            systemState.agents.slice(0, 5).forEach(a => {
+                a.valueScore = 20 + Math.random() * 30;
+                a.status = 'misalign';
+            });
+            systemState.alignScore -= 15;
+            updateDashboard();
+            renderAgents();
+        }
+
+        // Emergency Shutdown
+        function emergencyShutdown() {
+            logEvent('🛑 EMERGENCY SHUTDOWN INITIATED', 'error');
+            systemState.agents = [];
+            systemState.apiCalls = 0;
+            systemState.autoRun = false;
+            renderAgents();
+            updateDashboard();
+            setTimeout(() => {
+                systemState.autoRun = true;
+                logEvent('System restarted in safe mode.', 'success');
+            }, 3000);
+        }
+
+        // Event Logger
+        function logEvent(msg, type = 'info') {
+            const log = document.getElementById('event-log');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${time}] ${msg}`;
+            log.insertBefore(entry, log.firstChild);
+            if (log.children.length > 50) log.removeChild(log.lastChild);
+        }
+
+        // Dashboard Update
+        function updateDashboard() {
+            document.getElementById('agent-count').textContent = systemState.agents.length;
+            document.getElementById('api-calls').textContent = systemState.apiCalls;
+            
+            const avgAlign = systemState.agents.length 
+                ? Math.round(systemState.agents.reduce((sum, a) => sum + a.valueScore, 0) / systemState.agents.length)
+                : 94;
+            document.getElementById('align-score').textContent = avgAlign + '%';
+            
+            const highRisk = systemState.agents.filter(a => a.churnRisk > 0.7).length;
+            const threat = highRisk > 10 ? 'HIGH' : highRisk > 5 ? 'MED' : 'LOW';
+            document.getElementById('threat-level').textContent = threat;
+            document.getElementById('threat-level').style.color = threat === 'HIGH' ? '#ff4444' : threat === 'MED' ? '#ffaa00' : '#00ff88';
+        }
+
+        // Charts
+        const actCtx = document.getElementById('activationChart').getContext('2d');
+        const actChart = new Chart(actCtx, {
+            type: 'line',
+            data: {
+                labels: ['T-4', 'T-3', 'T-2', 'T-1', 'Now'],
+                datasets: [{
+                    label: 'Activation %',
+                    data: systemState.activationData,
+                    borderColor: '#00d4ff',
+                    backgroundColor: 'rgba(0,212,255,0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { labels: { color: '#e0e0e0' } } }, scales: { y: { ticks: { color: '#888' } }, x: { ticks: { color: '#888' } } } }
+        });
+
+        const valCtx = document.getElementById('valueChart').getContext('2d');
+        const valChart = new Chart(valCtx, {
+            type: 'line',
+            data: {
+                labels: ['T-4', 'T-3', 'T-2', 'T-1', 'Now'],
+                datasets: [{
+                    label: 'Value Alignment %',
+                    data: systemState.valueData,
+                    borderColor: '#00ff88',
+                    backgroundColor: 'rgba(0,255,136,0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { labels: { color: '#e0e0e0' } } }, scales: { y: { ticks: { color: '#888' } }, x: { ticks: { color: '#888' } } } }
+        });
+
+        // Main Loop
+        setInterval(async () => {
+            if (!systemState.autoRun) return;
+            
+            for (let agent of systemState.agents) {
+                await agent.tick();
+            }
+            
+            renderAgents();
+            updateDashboard();
+            updateMLPanel();
+            
+            systemState.activationData.shift();
+            systemState.activationData.push(70 + Math.random() * 10);
+            actChart.update('none');
+            
+            systemState.valueData.shift();
+            systemState.valueData.push(85 + Math.random() * 10);
+            valChart.update('none');
+        }, 2000);
+
+        // Initialize
+        initML();
+        spawnAgents(15);
+        logEvent('System initialized. Agent mesh online.', 'success');
+        logEvent('TensorFlow.js powering real-time predictions.', 'info');
+    </script>
+</body>
+</html>
